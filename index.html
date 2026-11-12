@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Death Counter</title>
+<!--
+  Twitch Death Counter — OBS Browser Source widget
+  ------------------------------------------------
+  Hosted: https://kideohojima.github.io/death-counter/?channel=yourchannel
+  Local: OBS → Sources → + → Browser → tick "Local file" → pick this file.
+  OBS's local-file mode can't take ?query params, so set CONFIG below.
+  If you host the file on a web server instead, URL params override CONFIG:
+    death-counter.html?channel=yourchannel&cmd=deathcount&label=Deaths
+
+  Chat commands (only the broadcaster and moderators):
+    !deathcount 10      set to 10
+    !deathcount up      +1   (also: +, add, inc)
+    !deathcount down    -1   (also: -, sub, dec)
+    !deathcount +5 / -3 add or subtract a number
+    !deathcount reset   back to 0
+-->
+<style>
+  html, body {
+    margin: 0;
+    background: transparent;   /* lets OBS show only the text */
+    overflow: hidden;
+  }
+  #counter {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    padding: 0.2em 0.5em;
+    font: 800 64px/1.1 "Segoe UI", "Noto Sans Thai", system-ui, sans-serif;
+    color: #fff;
+    -webkit-text-stroke: 2px #000;
+    paint-order: stroke fill;
+    text-shadow: 0 3px 6px rgba(0,0,0,.6);
+    transform-origin: left center;
+  }
+  #value { color: #ff4d4d; min-width: 1ch; display: inline-block; }
+  .bump  { animation: bump 400ms ease-out; }
+  @keyframes bump {
+    0%   { transform: scale(1); }
+    35%  { transform: scale(1.35); }
+    100% { transform: scale(1); }
+  }
+  #status {
+    position: fixed; bottom: 2px; left: 4px;
+    font: 12px monospace; color: #ff0; opacity: .8;
+    -webkit-text-stroke: 0; text-shadow: 0 0 2px #000;
+  }
+</style>
+</head>
+<body>
+  <div id="counter"><span id="label">💀 Deaths:</span><span id="value">0</span></div>
+  <div id="status"></div>
+
+<script>
+// ===== CONFIG (edit these) ==================================================
+const CONFIG = {
+  channel: "yourchannel",   // Twitch channel name, lowercase, no #
+  cmd: "deathcount",        // command word without "!"
+  label: "💀 Deaths:",      // text shown before the number
+  allowVIP: false,          // let VIPs use the command too
+  showStatus: true          // small connection text at bottom-left (hides once connected)
+};
+// ============================================================================
+
+const params  = new URLSearchParams(location.search);
+const channel = (params.get("channel") || CONFIG.channel).toLowerCase().replace(/^#/, "");
+const cmd     = (params.get("cmd") || CONFIG.cmd).toLowerCase().replace(/^!/, "");
+const label   = params.get("label") ?? CONFIG.label;
+const allowVIP = params.has("vip") ? params.get("vip") === "1" : CONFIG.allowVIP;
+const storeKey = `deathcount:${channel}:${cmd}`;
+
+const $value  = document.getElementById("value");
+const $label  = document.getElementById("label");
+const $status = document.getElementById("status");
+const $counter = document.getElementById("counter");
+$label.textContent = label;
+
+// ---- persistence (survives OBS restarts; per-machine) ----
+function load() {
+  try { return parseInt(localStorage.getItem(storeKey), 10) || 0; } catch { return 0; }
+}
+function save(n) {
+  try { localStorage.setItem(storeKey, String(n)); } catch {}
+}
+
+let count = load();
+render(false);
+
+function render(animate = true) {
+  $value.textContent = count;
+  if (animate) {
+    $counter.classList.remove("bump");
+    void $counter.offsetWidth;          // restart animation
+    $counter.classList.add("bump");
+  }
+}
+function setCount(n) {
+  n = Math.max(0, Math.min(999999, Math.trunc(n)));
+  if (n === count) return;
+  count = n; save(n); render();
+}
+function status(text) {
+  $status.textContent = CONFIG.showStatus ? text : "";
+}
+
+// ---- command handling ----
+function handleCommand(arg) {
+  arg = (arg || "").trim().toLowerCase();
+  if (arg === "") return;                                   // bare "!deathcount": ignore
+  if (["up", "+", "add", "inc", "++"].includes(arg))   return setCount(count + 1);
+  if (["down", "-", "sub", "dec", "--"].includes(arg)) return setCount(count - 1);
+  if (arg === "reset")                                  return setCount(0);
+  if (/^[+-]\d+$/.test(arg))                            return setCount(count + parseInt(arg, 10));
+  if (/^\d+$/.test(arg))                                return setCount(parseInt(arg, 10));
+}
+
+function isPrivileged(tags) {
+  const badges = tags["badges"] || "";
+  if (/(^|,)broadcaster\//.test(badges)) return true;
+  if (tags["mod"] === "1" || /(^|,)moderator\//.test(badges)) return true;
+  if (allowVIP && /(^|,)vip\//.test(badges)) return true;
+  return false;
+}
+
+// ---- Twitch IRC (anonymous, read-only) ----
+function parseLine(line) {
+  // @tags :nick!nick@nick.tmi.twitch.tv PRIVMSG #channel :message
+  let tags = {}, rest = line;
+  if (rest.startsWith("@")) {
+    const sp = rest.indexOf(" ");
+    for (const pair of rest.slice(1, sp).split(";")) {
+      const eq = pair.indexOf("=");
+      tags[pair.slice(0, eq)] = pair.slice(eq + 1);
+    }
+    rest = rest.slice(sp + 1);
+  }
+  const m = rest.match(/^:(\S+?)!\S+ PRIVMSG #(\S+) :(.*)$/);
+  if (!m) return null;
+  return { tags, user: m[1], channel: m[2], text: m[3] };
+}
+
+const cmdRe = new RegExp(`^!${cmd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s+(.*))?$`, "i");
+let ws, retry = 0;
+
+function connect() {
+  status("connecting…");
+  ws = new WebSocket("wss://irc-ws.chat.twitch.tv:443");
+
+  ws.onopen = () => {
+    ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands");
+    ws.send("PASS SCHMOOPIIE");                                   // any value works for anonymous
+    ws.send("NICK justinfan" + Math.floor(10000 + Math.random() * 89999));
+    ws.send("JOIN #" + channel);
+  };
+
+  ws.onmessage = (ev) => {
+    for (const line of ev.data.split("\r\n")) {
+      if (!line) continue;
+      if (line.startsWith("PING")) { ws.send("PONG" + line.slice(4)); continue; }
+      if (/ 366 /.test(line)) { retry = 0; status(""); continue; }     // end of JOIN = connected
+      if (line.includes("RECONNECT")) { ws.close(); continue; }
+      const msg = parseLine(line);
+      if (!msg) continue;
+      const hit = msg.text.trim().match(cmdRe);
+      if (hit && isPrivileged(msg.tags)) handleCommand(hit[1]);
+    }
+  };
+
+  ws.onclose = () => {
+    const delay = Math.min(30000, 1000 * 2 ** retry++);
+    status(`disconnected — retrying in ${Math.round(delay / 1000)}s`);
+    setTimeout(connect, delay);
+  };
+  ws.onerror = () => ws.close();
+}
+
+connect();
+</script>
+</body>
