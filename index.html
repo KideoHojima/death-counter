@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Death Counter</title>
+<link rel="icon" href="data:,">
 <!--
   Twitch Death Counter — OBS Browser Source widget
   ------------------------------------------------
@@ -11,6 +12,8 @@
   OBS's local-file mode can't take ?query params, so set CONFIG below.
   If you host the file on a web server instead, URL params override CONFIG:
     death-counter.html?channel=yourchannel&cmd=deathcount&label=Deaths
+  Appearance params: size, color, num, stroke, outline, shadow=0, font
+  Easiest: build the URL with control.html (the control panel).
 
   Chat commands (only the broadcaster and moderators):
     !deathcount 10      set to 10
@@ -28,6 +31,7 @@
   #counter {
     display: inline-flex;
     align-items: center;
+    white-space: nowrap;
     gap: 0.4em;
     padding: 0.2em 0.5em;
     font: 800 64px/1.1 "Segoe UI", "Noto Sans Thai", system-ui, sans-serif;
@@ -82,14 +86,43 @@ const $status = document.getElementById("status");
 const $counter = document.getElementById("counter");
 $label.textContent = label;
 
+// ---- appearance (optional URL params; the control panel builds these) ----
+//   size=64  color=ffffff  num=ff4d4d  stroke=000000  outline=2  shadow=0  font=Segoe UI
+function colorParam(name) {
+  const v = params.get(name);
+  if (!v) return null;
+  const c = "#" + v.replace(/^#/, "");
+  return /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(c) ? c : null;
+}
+const size = parseInt(params.get("size"), 10);
+if (size >= 8 && size <= 400) $counter.style.fontSize = size + "px";
+const textColor = colorParam("color");
+if (textColor) $counter.style.color = textColor;
+const numColor = colorParam("num");
+if (numColor) $value.style.color = numColor;
+if (params.has("stroke") || params.has("outline")) {
+  const w = params.has("outline") ? Math.max(0, Math.min(20, parseFloat(params.get("outline")) || 0)) : 2;
+  $counter.style.webkitTextStroke = w + "px " + (colorParam("stroke") || "#000");
+}
+if (params.get("shadow") === "0") $counter.style.textShadow = "none";
+const font = (params.get("font") || "").replace(/[^\w \-]/g, "").trim();
+if (font) $counter.style.fontFamily = `"${font}", "Segoe UI", "Noto Sans Thai", system-ui, sans-serif`;
+
+// ---- preview mode (used by control.html) ----
+// preview=1: no chat connection and nothing saved; the panel sends the number
+// to show via postMessage({ type: "deathcount", count }).
+const preview = params.get("preview") === "1";
+
 // ---- persistence ----
 // Saved in the browser source's localStorage under a key per channel + command,
 // so each streamer keeps their own count across OBS restarts and streams.
 // It lives on this PC only (another PC / OBS install starts from its own count).
 function load() {
+  if (preview) return parseInt(params.get("value"), 10) || 0;
   try { return parseInt(localStorage.getItem(storeKey), 10) || 0; } catch (e) { return 0; }
 }
 function save(n) {
+  if (preview) return;
   try { localStorage.setItem(storeKey, String(n)); } catch (e) {}
 }
 
@@ -120,7 +153,7 @@ function log(text) {
 // Chat clients (7TV, Chatterino, Twitch's duplicate-message bypass) can append
 // invisible characters such as U+E0000 or U+034F. Strip them before matching.
 function clean(text) {
-  return text.replace(/[\u{E0000}-\u{E007F}͏­᠎​-‏⁠-⁤﻿]/gu, "").trim();
+  return text.replace(/[\u{E0000}-\u{E007F}\u034F\u00AD\u180E\u200B-\u200F\u2060-\u2064\uFEFF]/gu, "").trim();
 }
 
 // ---- command handling ----
@@ -223,14 +256,21 @@ function connect() {
 // wait forever. So: if joining takes >15 s, or nothing at all arrives for 75 s,
 // treat the connection as dead. While idle we PING every 30 s so a healthy
 // connection always has traffic (Twitch answers with PONG).
-setInterval(() => {
-  if (!ws || reconnectTimer) return;
-  const idle = Date.now() - lastSeen;
-  if (!joined && idle > 15000) return reconnect("connect timed out");
-  if (idle > 75000)            return reconnect("connection went quiet");
-  if (idle > 30000 && ws.readyState === 1) ws.send("PING :deathcount");
-}, 10000);
-
-connect();
+if (preview) {
+  window.addEventListener("message", (e) => {
+    if (e.origin !== location.origin) return;
+    const d = e.data;
+    if (d && d.type === "deathcount" && typeof d.count === "number") setCount(d.count);
+  });
+} else {
+  connect();
+  setInterval(() => {
+    if (!ws || reconnectTimer) return;
+    const idle = Date.now() - lastSeen;
+    if (!joined && idle > 15000) return reconnect("connect timed out");
+    if (idle > 75000)            return reconnect("connection went quiet");
+    if (idle > 30000 && ws.readyState === 1) ws.send("PING :deathcount");
+  }, 10000);
+}
 </script>
 </body>

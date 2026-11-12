@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Death Counter — Control Panel</title>
+<link rel="icon" href="data:,">
+<!--
+  Control panel for the death counter widget (index.html).
+  - Log in with Twitch; the buttons send !deathcount commands to chat as you,
+    so every widget copy (every OBS source, every PC) receives them.
+  - Appearance / command settings build the OBS Browser Source URL.
+  Setup (once): register a Twitch app and paste its Client ID — see README.md.
+  Works as a normal browser tab or as an OBS Custom Browser Dock.
+-->
+<style>
+  :root {
+    --bg: #0f1115; --card: #181b22; --line: #2a2f3a; --text: #e8eaf0; --muted: #9aa1b2;
+    --accent: #9147ff; --accent2: #b085ff; --red: #ff4d4d; --green: #3ecf8e; --yellow: #f5c451;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 5; }
+  header h1 { font-size: 17px; margin: 0; font-weight: 700; }
+  .pill { font-size: 12px; padding: 3px 10px; border-radius: 99px; background: var(--line); color: var(--muted); white-space: nowrap; }
+  .pill.ok { background: rgba(62,207,142,.15); color: var(--green); }
+  .pill.warn { background: rgba(245,196,81,.15); color: var(--yellow); }
+  .pill.bad { background: rgba(255,77,77,.15); color: var(--red); }
+  .spacer { flex: 1; }
+  main { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 16px; padding: 16px 20px 40px; max-width: 1200px; margin: 0 auto; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  .wide { grid-column: 1 / -1; }
+  label.field { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 10px; margin: 8px 0; color: var(--muted); }
+  input[type=text], input[type=number], select {
+    width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; font: inherit;
+  }
+  input[type=text]:focus, input[type=number]:focus, select:focus { outline: none; border-color: var(--accent); }
+  input[type=color] { width: 48px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); cursor: pointer; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .inline { display: flex; gap: 8px; align-items: center; }
+  button {
+    background: var(--line); color: var(--text); border: 1px solid transparent; border-radius: 8px; padding: 8px 14px;
+    font: 600 14px "Segoe UI", system-ui, sans-serif; cursor: pointer; transition: background .12s, transform .05s;
+  }
+  button:hover:not(:disabled) { background: #343a48; }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: var(--accent); }
+  button.primary:hover:not(:disabled) { background: var(--accent2); }
+  button.danger { background: rgba(255,77,77,.18); color: var(--red); }
+  button.danger.armed { background: var(--red); color: #fff; }
+  button.big { font-size: 22px; padding: 10px 0; flex: 1; }
+  .count { font: 800 76px/1 "Segoe UI", system-ui, sans-serif; text-align: center; color: var(--red); margin: 4px 0 14px; font-variant-numeric: tabular-nums; }
+  .hint { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
+  .hint code, p code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+  .warnbox { background: rgba(245,196,81,.1); border: 1px solid rgba(245,196,81,.35); color: var(--yellow); border-radius: 8px; padding: 9px 11px; font-size: 13px; margin-top: 10px; }
+  .preview {
+    margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; height: 130px;
+    background: repeating-conic-gradient(#20242d 0% 25%, #191c23 0% 50%) 50% / 20px 20px;
+  }
+  .preview { position: relative; }
+  .preview iframe { position: absolute; left: 8px; top: 8px; border: 0; background: transparent; transform-origin: 0 0; }
+  textarea#url { width: 100%; height: 74px; resize: vertical; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 8px; font: 12.5px Consolas, monospace; }
+  #log { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; font: 12.5px Consolas, monospace; }
+  #log li { padding: 3px 0; border-bottom: 1px solid #1f232b; color: var(--muted); }
+  #log li b { color: var(--text); font-weight: 600; }
+  #log li.err { color: var(--red); }
+  details summary { cursor: pointer; color: var(--accent2); margin-top: 10px; }
+  details ol { padding-left: 20px; color: var(--muted); }
+  a { color: var(--accent2); }
+  .account { display: flex; align-items: center; gap: 10px; }
+  .account .who { flex: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>💀 Death Counter — Control Panel</h1>
+  <span id="connPill" class="pill">not logged in</span>
+  <span class="spacer"></span>
+  <span class="pill" id="rolePill" hidden></span>
+</header>
+
+<main>
+  <!-- ===== Account ===== -->
+  <section>
+    <h2>Twitch account</h2>
+    <div class="account">
+      <div class="who" id="who">Not logged in.</div>
+      <button class="primary" id="loginBtn">Log in with Twitch</button>
+      <button id="logoutBtn" hidden>Log out</button>
+    </div>
+    <label class="field">Channel
+      <input type="text" id="channel" placeholder="your channel name" autocomplete="off" spellcheck="false">
+    </label>
+    <p class="hint">The panel sends commands to this channel's chat as the logged-in account. That account must be the broadcaster or a moderator there (or a VIP, if VIP access is on).</p>
+    <div id="roleWarn" class="warnbox" hidden></div>
+    <details id="setup">
+      <summary>Twitch app setup (Client ID)</summary>
+      <ol>
+        <li>Open <a href="https://dev.twitch.tv/console/apps" target="_blank" rel="noopener">dev.twitch.tv/console/apps</a> → <b>Register Your Application</b>.</li>
+        <li>Name: anything (e.g. <code>Death Counter Panel</code>). OAuth Redirect URL: <code id="redirectShow"></code></li>
+        <li>Category: <b>Broadcaster Suite</b>. Client Type: <b>Public</b>. Click Create, then <b>Manage</b> and copy the Client ID.</li>
+      </ol>
+      <label class="field">Client ID
+        <input type="text" id="clientId" placeholder="paste your Twitch Client ID" autocomplete="off" spellcheck="false">
+      </label>
+    </details>
+  </section>
+
+  <!-- ===== Count ===== -->
+  <section>
+    <h2>Count</h2>
+    <div class="count" id="count">0</div>
+    <div class="row">
+      <button class="big" id="minus1" disabled>−1</button>
+      <button class="big primary" id="plus1" disabled>+1</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <input type="number" id="amount" min="0" max="999999" value="1" style="width:100px">
+      <button id="addN" disabled>Add</button>
+      <button id="subN" disabled>Subtract</button>
+      <button id="setN" disabled>Set to</button>
+      <span class="spacer"></span>
+      <button class="danger" id="reset" disabled>Reset</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="sync" disabled>Push this number to all widgets</button>
+    </div>
+    <p class="hint">Shortcuts (click outside text boxes first): <code>+</code> / <code>-</code>. The number above is what this panel has seen in chat. If a widget was offline and drifted, use <b>Push</b> to set every widget to it.</p>
+  </section>
+
+  <!-- ===== Appearance ===== -->
+  <section>
+    <h2>Appearance</h2>
+    <label class="field">Label <input type="text" id="label"></label>
+    <label class="field">Font size <span class="inline"><input type="range" id="size" min="16" max="200" step="1"><span id="sizeOut" style="min-width:48px;text-align:right"></span></span></label>
+    <label class="field">Font <select id="font">
+      <option>Segoe UI</option><option>Arial Black</option><option>Impact</option><option>Verdana</option>
+      <option>Trebuchet MS</option><option>Georgia</option><option>Consolas</option><option>Comic Sans MS</option>
+    </select></label>
+    <label class="field">Label colour <input type="color" id="color"></label>
+    <label class="field">Number colour <input type="color" id="num"></label>
+    <label class="field">Outline <span class="inline"><input type="color" id="stroke"><input type="range" id="outline" min="0" max="10" step="0.5"><span id="outlineOut" style="min-width:40px;text-align:right"></span></span></label>
+    <label class="field">Shadow <span><input type="checkbox" id="shadow"></span></label>
+    <div class="row"><button id="resetLook">Reset appearance</button></div>
+    <div class="preview"><iframe id="preview" title="Widget preview"></iframe></div>
+    <p class="hint">Live preview. The chequered background stands for transparency.</p>
+  </section>
+
+  <!-- ===== Command settings ===== -->
+  <section>
+    <h2>Command settings</h2>
+    <label class="field">Command word <span class="inline">!<input type="text" id="cmd" spellcheck="false"></span></label>
+    <label class="field">VIP access <span><input type="checkbox" id="vip"> let VIPs use the command</span></label>
+    <label class="field">Debug mode <span><input type="checkbox" id="debug"> show received chat lines on the widget</span></label>
+    <p class="hint">These are part of the widget URL: after changing them, copy the new URL into your OBS Browser Source. The panel uses the same command word when it sends.</p>
+  </section>
+
+  <!-- ===== OBS URL ===== -->
+  <section class="wide">
+    <h2>OBS Browser Source URL</h2>
+    <textarea id="url" readonly></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="copyUrl">Copy URL</button>
+      <a id="openUrl" target="_blank" rel="noopener">Open widget in a new tab</a>
+      <span class="spacer"></span>
+      <span class="hint" id="sizeHint" style="margin:0"></span>
+    </div>
+    <p class="hint">In OBS: Sources → + → Browser → paste the URL, set the width/height shown, then click <b>Refresh cache of current page</b> whenever you change the URL.</p>
+  </section>
+
+  <!-- ===== Log ===== -->
+  <section class="wide">
+    <h2>Activity</h2>
+    <ul id="log"></ul>
+  </section>
+</main>
+
+<script>
+"use strict";
+// Kept to ES2017 syntax so it also runs as an OBS 26 Custom Browser Dock.
+
+const DEFAULTS = {
+  clientId: "", channel: "", cmd: "deathcount", label: "💀 Deaths:", size: 64, font: "Segoe UI",
+  color: "#ffffff", num: "#ff4d4d", stroke: "#000000", outline: 2, shadow: true, vip: false, debug: false
+};
+const LOOK_KEYS = ["label", "size", "font", "color", "num", "stroke", "outline", "shadow"];
+const SETTINGS_KEY = "deathcount-panel:settings";
+const TOKEN_KEY = "deathcount-panel:token";
+const REDIRECT = location.origin + location.pathname;
+const WIDGET = new URL("index.html", location.href).href;
+
+const $ = (id) => document.getElementById(id);
+
+// ---------- settings ----------
+function loadSettings() {
+  let s = {};
+  try { s = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch (e) {}
+  return Object.assign({}, DEFAULTS, s);
+}
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {}
+}
+let settings = loadSettings();
+
+const fields = ["clientId", "channel", "cmd", "label", "size", "font", "color", "num", "stroke", "outline", "shadow", "vip", "debug"];
+function fillForm() {
+  for (const k of fields) {
+    const el = $(k);
+    if (el.type === "checkbox") el.checked = !!settings[k]; else el.value = settings[k];
+  }
+  $("sizeOut").textContent = settings.size + "px";
+  $("outlineOut").textContent = settings.outline + "px";
+}
+function readField(k) {
+  const el = $(k);
+  if (el.type === "checkbox") return el.checked;
+  if (el.type === "range" || el.type === "number") return parseFloat(el.value);
+  return el.value;
+}
+function normChannel(v) { return String(v || "").trim().toLowerCase().replace(/^#/, "").replace(/[^a-z0-9_]/g, ""); }
+function normCmd(v) { return String(v || "").trim().toLowerCase().replace(/^!/, "").replace(/\s+/g, ""); }
+
+// ---------- widget URL ----------
+function widgetParams(extra) {
+  const p = new URLSearchParams();
+  p.set("channel", settings.channel || "yourchannel");
+  if (settings.cmd !== DEFAULTS.cmd) p.set("cmd", settings.cmd);
+  if (settings.label !== DEFAULTS.label) p.set("label", settings.label);
+  if (settings.vip) p.set("vip", "1");
+  if (settings.debug) p.set("debug", "1");
+  if (settings.size !== DEFAULTS.size) p.set("size", String(settings.size));
+  if (settings.font !== DEFAULTS.font) p.set("font", settings.font);
+  if (settings.color !== DEFAULTS.color) p.set("color", settings.color.slice(1));
+  if (settings.num !== DEFAULTS.num) p.set("num", settings.num.slice(1));
+  if (settings.stroke !== DEFAULTS.stroke) p.set("stroke", settings.stroke.slice(1));
+  if (settings.outline !== DEFAULTS.outline) p.set("outline", String(settings.outline));
+  if (!settings.shadow) p.set("shadow", "0");
+  if (extra) for (const k in extra) p.set(k, extra[k]);
+  return p.toString();
+}
+function suggestedSize() {
+  // Room for the text plus the 1.35x "bump" animation, rounded up to tens.
+  const chars = Array.from(settings.label).length + 5;
+  const w = Math.ceil((settings.size * chars * 0.62 * 1.4 + 40) / 10) * 10;
+  const h = Math.ceil((settings.size * 1.6 + 40) / 10) * 10;
+  return { w: w, h: h };
+}
+function updateUrl() {
+  const url = WIDGET + "?" + widgetParams();
+  $("url").value = url;
+  $("openUrl").href = url;
+  const s = suggestedSize();
+  $("sizeHint").textContent = "Suggested size: " + s.w + " × " + s.h;
+}
+
+// ---------- preview ----------
+let previewTimer = null, previewSrc = "";
+function updatePreview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(() => {
+    const src = WIDGET + "?" + widgetParams({ preview: "1", value: String(count) });
+    const key = src.replace(/&value=\d+/, "");
+    if (key === previewSrc) return;
+    previewSrc = key;
+    $("preview").src = src;
+  }, 250);
+  fitPreview();
+}
+// Render the widget at its real OBS size, then scale it down to fit the box.
+function fitPreview() {
+  const s = suggestedSize(), f = $("preview"), box = f.parentNode;
+  const scale = Math.min(1, (box.clientWidth - 16) / s.w, (box.clientHeight - 16) / s.h);
+  f.style.width = s.w + "px";
+  f.style.height = s.h + "px";
+  f.style.transform = "scale(" + scale + ")";
+}
+window.addEventListener("resize", fitPreview);
+function postPreview() {
+  const w = $("preview").contentWindow;
+  if (w) w.postMessage({ type: "deathcount", count: count }, location.origin);
+}
+$("preview").addEventListener("load", postPreview);
+
+// ---------- log ----------
+function log(html, isErr) {
+  const li = document.createElement("li");
+  const t = new Date().toLocaleTimeString();
+  li.innerHTML = "<span>" + t + "</span>  " + html;
+  if (isErr) li.className = "err";
+  const ul = $("log");
+  ul.insertBefore(li, ul.firstChild);
+  while (ul.children.length > 200) ul.removeChild(ul.lastChild);
+}
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
+
+// ---------- count (the panel's view of it) ----------
+function countKey() { return "deathcount-panel:count:" + settings.channel + ":" + settings.cmd; }
+function loadCount() { try { return parseInt(localStorage.getItem(countKey()), 10) || 0; } catch (e) { return 0; } }
+let count = loadCount();
+function setCount(n) {
+  n = Math.max(0, Math.min(999999, Math.trunc(n)));
+  count = n;
+  try { localStorage.setItem(countKey(), String(n)); } catch (e) {}
+  $("count").textContent = n;
+  postPreview();
+}
+// Same rules as the widget's handleCommand().
+function parseArg(arg) {
+  arg = String(arg || "").trim().toLowerCase();
+  if (arg === "+") return { op: "add", n: 1 };
+  if (arg === "-") return { op: "add", n: -1 };
+  if (arg === "reset") return { op: "set", n: 0 };
+  if (/^[+-]\d+$/.test(arg)) return { op: "add", n: parseInt(arg, 10) };
+  if (/^\d+$/.test(arg)) return { op: "set", n: parseInt(arg, 10) };
+  return null;
+}
+function applyArg(arg) {
+  const a = parseArg(arg);
+  if (!a) return false;
+  setCount(a.op === "set" ? a.n : count + a.n);
+  return true;
+}
+
+// ---------- Twitch auth (implicit grant: token stays in this browser) ----------
+let token = null, login = null, validateTimer = null;
+try { token = localStorage.getItem(TOKEN_KEY); } catch (e) {}
+
+function startLogin() {
+  settings.clientId = $("clientId").value.trim();
+  saveSettings();
+  if (!settings.clientId) {
+    $("setup").open = true;
+    $("clientId").focus();
+    log("Paste your Twitch Client ID first (setup steps above).", true);
+    return;
+  }
+  const state = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  try { sessionStorage.setItem("deathcount-panel:state", state); } catch (e) {}
+  const q = new URLSearchParams({
+    response_type: "token", client_id: settings.clientId, redirect_uri: REDIRECT,
+    scope: "chat:read chat:edit", state: state
+  });
+  location.href = "https://id.twitch.tv/oauth2/authorize?" + q.toString();
+}
+
+function handleRedirect() {
+  if (!location.hash || location.hash.length < 2) return;
+  const h = new URLSearchParams(location.hash.slice(1));
+  let expected = null;
+  try { expected = sessionStorage.getItem("deathcount-panel:state"); sessionStorage.removeItem("deathcount-panel:state"); } catch (e) {}
+  history.replaceState(null, "", location.pathname + location.search);
+  if (h.get("error")) { log("Twitch login failed: " + esc(h.get("error_description") || h.get("error")), true); return; }
+  const t = h.get("access_token");
+  if (!t) return;
+  if (!expected || h.get("state") !== expected) { log("Login response didn't match this browser's login attempt; ignored it. Try again.", true); return; }
+  token = t;
+  try { localStorage.setItem(TOKEN_KEY, t); } catch (e) {}
+}
+
+function clearToken() {
+  token = null; login = null;
+  try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+}
+
+async function validate() {
+  if (!token) return false;
+  try {
+    const r = await fetch("https://id.twitch.tv/oauth2/validate", { headers: { Authorization: "OAuth " + token } });
+    if (r.status === 401) { clearToken(); log("Twitch login expired. Log in again.", true); return false; }
+    const d = await r.json();
+    login = d.login;
+    return true;
+  } catch (e) {
+    log("Couldn't reach Twitch to check the login (offline?). Retrying.", true);
+    return !!login;
+  }
+}
+
+async function logout() {
+  const t = token, cid = settings.clientId;
+  clearToken();
+  disconnect();
+  renderAccount();
+  if (t && cid) {
+    try {
+      await fetch("https://id.twitch.tv/oauth2/revoke", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ client_id: cid, token: t }).toString()
+      });
+    } catch (e) {}
+  }
+  log("Logged out.");
+}
+
+// ---------- Twitch chat (authenticated IRC over WebSocket) ----------
+let ws = null, joined = false, retry = 0, lastSeen = 0, reconnectTimer = null, role = null, wantConnected = false;
+
+function cmdRe() {
+  return new RegExp("^!" + settings.cmd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?:\\s+(.*))?$", "i");
+}
+const INVISIBLE = new RegExp("[" + String.fromCodePoint(0xE0000) + "-" + String.fromCodePoint(0xE007F) +
+  String.fromCharCode(0x034F, 0x00AD, 0x180E) + String.fromCharCode(0x200B) + "-" + String.fromCharCode(0x200F) +
+  String.fromCharCode(0x2060) + "-" + String.fromCharCode(0x2064) + String.fromCharCode(0xFEFF) + "]", "gu");
+function clean(text) { return text.replace(INVISIBLE, "").trim(); }
+
+function parseLine(line) {
+  let tags = {}, rest = line;
+  if (rest.charAt(0) === "@") {
+    const sp = rest.indexOf(" ");
+    for (const pair of rest.slice(1, sp).split(";")) {
+      const eq = pair.indexOf("=");
+      tags[pair.slice(0, eq)] = pair.slice(eq + 1);
+    }
+    rest = rest.slice(sp + 1);
+  }
+  return { tags: tags, rest: rest };
+}
+function privileged(tags) {
+  const b = tags["badges"] || "";
+  if (/(^|,)broadcaster\//.test(b)) return true;
+  if (tags["mod"] === "1" || /(^|,)moderator\//.test(b)) return true;
+  if (settings.vip && (tags["vip"] === "1" || /(^|,)vip\//.test(b))) return true;
+  return false;
+}
+
+function setPill(text, cls) { const p = $("connPill"); p.textContent = text; p.className = "pill " + (cls || ""); }
+function setButtons() {
+  const on = joined && !!token;
+  for (const id of ["minus1", "plus1", "addN", "subN", "setN", "reset", "sync"]) $(id).disabled = !on;
+}
+
+function disconnect() {
+  wantConnected = false;
+  clearTimeout(reconnectTimer); reconnectTimer = null;
+  if (ws) { ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null; try { ws.close(); } catch (e) {} ws = null; }
+  joined = false; role = null;
+  setButtons(); renderRole();
+  setPill(token ? "disconnected" : "not logged in", token ? "warn" : "");
+}
+
+function scheduleReconnect(reason) {
+  if (reconnectTimer || !wantConnected) return;
+  if (ws) { ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null; try { ws.close(); } catch (e) {} ws = null; }
+  joined = false; setButtons();
+  const delay = Math.min(30000, 1000 * Math.pow(2, retry++));
+  setPill(reason + " — retrying in " + Math.round(delay / 1000) + "s", "warn");
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, delay);
+}
+
+async function connect() {
+  if (!token || !settings.channel) { disconnect(); return; }
+  wantConnected = true;
+  if (!login && !(await validate())) { renderAccount(); disconnect(); return; }
+  if (!wantConnected) return;
+  setPill("connecting…");
+  lastSeen = Date.now();
+  const sock = new WebSocket("wss://irc-ws.chat.twitch.tv:443");
+  ws = sock;
+  const chan = settings.channel;
+  sock.onopen = () => {
+    sock.send("CAP REQ :twitch.tv/tags twitch.tv/commands");
+    sock.send("PASS oauth:" + token);
+    sock.send("NICK " + login);
+    sock.send("JOIN #" + chan);
+  };
+  sock.onmessage = (ev) => {
+    lastSeen = Date.now();
+    for (const line of ev.data.split("\r\n")) {
+      if (!line) continue;
+      if (line.indexOf("PING") === 0) { sock.send("PONG" + line.slice(4)); continue; }
+      const p = parseLine(line), rest = p.rest, tags = p.tags;
+      if (/ 366 /.test(rest)) {
+        joined = true; retry = 0;
+        setPill("connected to #" + chan, "ok");
+        setButtons();
+        log("Connected to <b>#" + esc(chan) + "</b> as <b>" + esc(login) + "</b>.");
+        continue;
+      }
+      if (/^:tmi\.twitch\.tv RECONNECT\b/.test(rest)) { scheduleReconnect("Twitch asked to reconnect"); return; }
+      if (/^:tmi\.twitch\.tv NOTICE \* :/.test(rest)) {        // login problems arrive as NOTICE *
+        const text = rest.replace(/^:tmi\.twitch\.tv NOTICE \* :/, "");
+        log("Twitch: " + esc(text), true);
+        if (/authentication failed|improperly formatted auth/i.test(text)) {
+          clearToken(); disconnect(); renderAccount();
+          log("Your Twitch login is no longer valid. Log in again.", true);
+        }
+        return;
+      }
+      if (/ NOTICE #/.test(rest)) {                             // e.g. msg_duplicate, msg_ratelimit, msg_banned
+        log("Twitch: " + esc(rest.replace(/^.* NOTICE #\S+ :/, "")), true);
+        continue;
+      }
+      if (/ USERSTATE #/.test(rest)) {                          // our own badges in this channel
+        role = privileged(tags) ? (/(^|,)broadcaster\//.test(tags["badges"] || "") ? "broadcaster" : (tags["mod"] === "1" ? "moderator" : "VIP")) : "viewer";
+        renderRole();
+        continue;
+      }
+      const m = rest.match(/^:(\S+?)!\S+ PRIVMSG #(\S+) :(.*)$/);
+      if (!m) continue;
+      const text = clean(m[3]);
+      const hit = text.match(cmdRe());
+      if (!hit) continue;
+      if (!privileged(tags)) { log(esc(m[1]) + ": " + esc(text) + "  (ignored: not broadcaster/mod)"); continue; }
+      if (applyArg(hit[1])) log("<b>" + esc(m[1]) + "</b>: " + esc(text) + "  → " + count);
+    }
+  };
+  sock.onclose = () => scheduleReconnect("disconnected");
+  sock.onerror = () => scheduleReconnect("connection error");
+}
+
+// Same watchdog as the widget: recover from silently dead connections.
+setInterval(() => {
+  if (!ws || reconnectTimer || !wantConnected) return;
+  const idle = Date.now() - lastSeen;
+  if (!joined && idle > 15000) return scheduleReconnect("connect timed out");
+  if (idle > 75000) return scheduleReconnect("connection went quiet");
+  if (idle > 30000 && ws.readyState === 1) ws.send("PING :panel");
+}, 10000);
+// Twitch asks apps to re-validate tokens hourly.
+validateTimer = setInterval(async () => {
+  if (token && !(await validate())) { disconnect(); renderAccount(); }
+}, 3600 * 1000);
+
+// ---------- sending ----------
+let lastSent = "", lastSentAt = 0;
+const TAG = " " + String.fromCodePoint(0xE0000);
+function send(arg) {
+  if (!ws || !joined) return;
+  let msg = "!" + settings.cmd + " " + arg;
+  // Twitch can drop a message identical to your previous one (within 30 s).
+  // Alternate an invisible tag character on repeats; the widget strips it.
+  if (msg === lastSent && Date.now() - lastSentAt < 30000) msg += TAG;
+  ws.send("PRIVMSG #" + settings.channel + " :" + msg);
+  lastSent = msg; lastSentAt = Date.now();
+  applyArg(arg);                                   // Twitch doesn't echo our own message back
+  log("<b>You</b>: !" + esc(settings.cmd) + " " + esc(arg) + "  → " + count);
+}
+function amount() {
+  const n = Math.trunc(parseFloat($("amount").value));
+  return isFinite(n) && n >= 0 ? Math.min(999999, n) : null;
+}
+
+$("plus1").onclick = () => send("+");
+$("minus1").onclick = () => send("-");
+$("addN").onclick = () => { const n = amount(); if (n) send("+" + n); };
+$("subN").onclick = () => { const n = amount(); if (n) send("-" + n); };
+$("setN").onclick = () => { const n = amount(); if (n !== null) send(String(n)); };
+$("sync").onclick = () => send(String(count));
+let resetArmed = null;
+$("reset").onclick = () => {
+  const b = $("reset");
+  if (resetArmed) { clearTimeout(resetArmed); resetArmed = null; b.classList.remove("armed"); b.textContent = "Reset"; send("reset"); return; }
+  b.classList.add("armed"); b.textContent = "Click again to reset";
+  resetArmed = setTimeout(() => { resetArmed = null; b.classList.remove("armed"); b.textContent = "Reset"; }, 3000);
+};
+document.addEventListener("keydown", (e) => {
+  const tag = (e.target && e.target.tagName) || "";
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === "+" || e.key === "=") { if (!$("plus1").disabled) { e.preventDefault(); send("+"); } }
+  else if (e.key === "-" || e.key === "_") { if (!$("minus1").disabled) { e.preventDefault(); send("-"); } }
+});
+
+// ---------- UI rendering ----------
+function renderAccount() {
+  const loggedIn = !!token;
+  $("loginBtn").hidden = loggedIn;
+  $("logoutBtn").hidden = !loggedIn;
+  $("who").innerHTML = loggedIn ? (login ? "Logged in as <b>" + esc(login) + "</b>" : "Checking login…") : "Not logged in.";
+  if (!loggedIn) setPill("not logged in");
+}
+function renderRole() {
+  const pill = $("rolePill"), warn = $("roleWarn");
+  if (!role) { pill.hidden = true; warn.hidden = true; return; }
+  pill.hidden = false;
+  pill.textContent = "you are: " + role;
+  pill.className = "pill " + (role === "viewer" ? "bad" : "ok");
+  warn.hidden = role !== "viewer";
+  warn.textContent = "Your account isn't the broadcaster or a moderator in #" + settings.channel +
+    ", so widgets will ignore commands sent from this panel. Log in as the broadcaster, or get modded there.";
+}
+
+// ---------- form wiring ----------
+let reconnectDebounce = null;
+for (const k of fields) {
+  $(k).addEventListener("input", () => {
+    let v = readField(k);
+    if (k === "channel") v = normChannel(v);
+    if (k === "cmd") v = normCmd(v) || DEFAULTS.cmd;
+    if (k === "clientId") v = String(v).trim();
+    const changed = settings[k] !== v;
+    settings[k] = v;
+    saveSettings();
+    if (k === "size") $("sizeOut").textContent = v + "px";
+    if (k === "outline") $("outlineOut").textContent = v + "px";
+    updateUrl(); updatePreview();
+    if (changed && (k === "channel" || k === "cmd")) {
+      count = loadCount(); $("count").textContent = count; postPreview();
+    }
+    if (changed && k === "channel") {
+      clearTimeout(reconnectDebounce);
+      reconnectDebounce = setTimeout(() => { disconnect(); connect(); }, 800);
+    }
+    if (k === "vip") renderRole();
+  });
+}
+$("channel").addEventListener("blur", () => { $("channel").value = settings.channel; });
+$("cmd").addEventListener("blur", () => { $("cmd").value = settings.cmd; });
+$("resetLook").onclick = () => {
+  for (const k of LOOK_KEYS) settings[k] = DEFAULTS[k];
+  saveSettings(); fillForm(); updateUrl(); updatePreview();
+};
+$("copyUrl").onclick = async () => {
+  const ta = $("url");
+  try { await navigator.clipboard.writeText(ta.value); }
+  catch (e) { ta.select(); document.execCommand("copy"); }
+  $("copyUrl").textContent = "Copied!";
+  setTimeout(() => { $("copyUrl").textContent = "Copy URL"; }, 1500);
+};
+$("loginBtn").onclick = startLogin;
+$("logoutBtn").onclick = logout;
+$("redirectShow").textContent = REDIRECT;
+
+// ---------- start ----------
+(async function init() {
+  handleRedirect();
+  fillForm();
+  $("count").textContent = count;
+  if (!settings.clientId) $("setup").open = true;
+  updateUrl(); updatePreview();
+  renderAccount();
+  if (token) {
+    if (await validate()) { renderAccount(); if (settings.channel) connect(); else log("Enter your channel name to connect."); }
+    else renderAccount();
+  }
+})();
+</script>
+</body>
+</html>
