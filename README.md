@@ -1,6 +1,7 @@
 # Death Counter
 
-Twitch chat-controlled death counter for an OBS Browser Source, plus a control panel.
+Twitch chat-controlled death counter for an OBS Browser Source, plus a control panel —
+or a keyboard-hotkey version that runs as an OBS script (no chat, no browser).
 
 - **Widget (put in OBS):** `https://kideohojima.github.io/death-counter/?channel=YOURCHANNEL`
 - **Control panel:** `https://kideohojima.github.io/death-counter/control.html`
@@ -60,3 +61,25 @@ The widget reads chat anonymously (read-only). The count is saved automatically 
 it carries over between streams and OBS restarts. Different streamers (different `?channel=`)
 each keep their own count. Each browser keeps its own copy, so an OBS source that was offline
 can drift — use **Push this number to all widgets** in the panel to resync.
+
+## Hotkey version (OBS script)
+
+`obs/death-counter.lua` is a standalone alternative: an OBS script that shows the count in a
+normal Text source and changes it with keyboard hotkeys, which work while a game is focused.
+
+1. Download [`obs/death-counter.lua`](obs/death-counter.lua) and keep it somewhere permanent.
+2. In OBS, add a **Text (GDI+)** source to your scene, e.g. named `Death Counter`, and style it
+   (font, colour, outline) in its properties.
+3. **Tools → Scripts → +**, pick `death-counter.lua`. In the script settings choose your Text
+   source and set the label (default `Deaths: `).
+4. **File → Settings → Hotkeys**, search `Death Counter`, bind **+1**, **-1** and **Reset**.
+
+The count is saved with OBS automatically. Optionally, the script also writes the number to a
+text file. The script settings also have +1 / -1 / Reset buttons and a field to type a number.
+
+Notes:
+- OBS hotkeys don't block the key from reaching the game. Pick keys the game doesn't use
+  (e.g. numpad keys, or Ctrl+Shift+key).
+- If a game runs as administrator, OBS must also run as administrator, or Windows won't pass
+  it the hotkeys.
+- This version is separate from the chat widget: `!deathcount` in chat does not change it.
