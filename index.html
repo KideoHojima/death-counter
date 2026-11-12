@@ -71,6 +71,7 @@ const channel = (params.get("channel") || CONFIG.channel).toLowerCase().replace(
 const cmd     = (params.get("cmd") || CONFIG.cmd).toLowerCase().replace(/^!/, "");
 const label   = params.get("label") ?? CONFIG.label;
 const allowVIP = params.has("vip") ? params.get("vip") === "1" : CONFIG.allowVIP;
+const debug   = params.get("debug") === "1";   // ?debug=1 shows every chat line the widget receives
 const storeKey = `deathcount:${channel}:${cmd}`;
 
 const $value  = document.getElementById("value");
@@ -104,7 +105,17 @@ function setCount(n) {
   count = n; save(n); render();
 }
 function status(text) {
-  $status.textContent = CONFIG.showStatus ? text : "";
+  $status.textContent = (CONFIG.showStatus || debug) ? text : "";
+}
+function log(text) {
+  console.log("[deathcount]", text);
+  if (debug) status(text);
+}
+
+// Chat clients (7TV, Chatterino, Twitch's duplicate-message bypass) can append
+// invisible characters such as U+E0000 or U+034F. Strip them before matching.
+function clean(text) {
+  return text.replace(/[\u{E0000}-\u{E007F}͏­᠎​-‏⁠-⁤﻿]/gu, "").trim();
 }
 
 // ---- command handling ----
@@ -161,12 +172,21 @@ function connect() {
     for (const line of ev.data.split("\r\n")) {
       if (!line) continue;
       if (line.startsWith("PING")) { ws.send("PONG" + line.slice(4)); continue; }
-      if (/ 366 /.test(line)) { retry = 0; status(""); continue; }     // end of JOIN = connected
-      if (line.includes("RECONNECT")) { ws.close(); continue; }
+      if (/ 366 /.test(line)) {                                       // end of JOIN = connected
+        retry = 0;
+        status(`connected to #${channel}`);
+        if (!debug) setTimeout(() => status(""), 5000);
+        continue;
+      }
+      if (/^(?:@\S+ )?:tmi\.twitch\.tv RECONNECT\b/.test(line)) { ws.close(); continue; }
       const msg = parseLine(line);
       if (!msg) continue;
-      const hit = msg.text.trim().match(cmdRe);
-      if (hit && isPrivileged(msg.tags)) handleCommand(hit[1]);
+      const text = clean(msg.text);
+      const hit = text.match(cmdRe);
+      if (!hit) { log(`${msg.user}: ${text}  (not a !${cmd} command)`); continue; }
+      if (!isPrivileged(msg.tags)) { log(`${msg.user}: ${text}  (ignored: not broadcaster/mod)`); continue; }
+      handleCommand(hit[1]);
+      log(`${msg.user}: ${text}  → ${count}`);
     }
   };
 

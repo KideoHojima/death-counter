@@ -4,7 +4,7 @@ Twitch chat-controlled death counter for an OBS Browser Source.
 
 **OBS URL:** `https://kideohojima.github.io/death-counter/?channel=YOURCHANNEL`
 
-Optional params: `cmd=deathcount`, `label=Deaths:`, `vip=1`
+Optional params: `cmd=deathcount`, `label=Deaths:`, `vip=1`, `debug=1` (shows every chat line the widget receives — use this to troubleshoot)
 
 ## Commands (broadcaster & mods only)
 
