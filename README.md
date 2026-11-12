@@ -11,8 +11,10 @@ Optional params: `cmd=deathcount`, `label=Deaths:`, `vip=1`, `debug=1` (shows ev
 | Command | Effect |
 |---|---|
 | `!deathcount 10` | set to 10 |
-| `!deathcount up` / `down` | +1 / -1 |
+| `!deathcount +` / `-` | +1 / -1 |
 | `!deathcount +5` / `-3` | add / subtract |
 | `!deathcount reset` | 0 |
 
-Reads chat anonymously (read-only). The count is stored per PC in OBS.
+Reads chat anonymously (read-only).
+
+**Saving:** the count is saved automatically for each channel, so it carries over between streams and OBS restarts. Different streamers (different `?channel=`) each keep their own count. It's stored in OBS on that PC — a different PC starts from its own count.
