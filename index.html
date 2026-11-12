@@ -160,30 +160,49 @@ function parseLine(line) {
 }
 
 const cmdRe = new RegExp(`^!${cmd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s+(.*))?$`, "i");
-let ws, retry = 0;
+let ws = null, retry = 0, joined = false, lastSeen = 0, reconnectTimer = null, hideTimer = null;
+
+// Tear down the current socket (if any) and schedule exactly one reconnect.
+function reconnect(reason) {
+  if (reconnectTimer) return;                    // already scheduled
+  if (ws) {
+    ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+    try { ws.close(); } catch (e) {}
+    ws = null;
+  }
+  joined = false;
+  const delay = Math.min(30000, 1000 * Math.pow(2, retry++));
+  status(`${reason} — retrying in ${Math.round(delay / 1000)}s`);
+  log(`${reason}; reconnecting in ${delay} ms`);
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, delay);
+}
 
 function connect() {
   status("connecting…");
-  ws = new WebSocket("wss://irc-ws.chat.twitch.tv:443");
+  lastSeen = Date.now();
+  const sock = new WebSocket("wss://irc-ws.chat.twitch.tv:443");
+  ws = sock;
 
-  ws.onopen = () => {
-    ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands");
-    ws.send("PASS SCHMOOPIIE");                                   // any value works for anonymous
-    ws.send("NICK justinfan" + Math.floor(10000 + Math.random() * 89999));
-    ws.send("JOIN #" + channel);
+  sock.onopen = () => {
+    sock.send("CAP REQ :twitch.tv/tags twitch.tv/commands");
+    sock.send("PASS SCHMOOPIIE");                                 // any value works for anonymous
+    sock.send("NICK justinfan" + Math.floor(10000 + Math.random() * 89999));
+    sock.send("JOIN #" + channel);
   };
 
-  ws.onmessage = (ev) => {
+  sock.onmessage = (ev) => {
+    lastSeen = Date.now();
     for (const line of ev.data.split("\r\n")) {
       if (!line) continue;
-      if (line.startsWith("PING")) { ws.send("PONG" + line.slice(4)); continue; }
+      if (line.startsWith("PING")) { sock.send("PONG" + line.slice(4)); continue; }
       if (/ 366 /.test(line)) {                                       // end of JOIN = connected
-        retry = 0;
+        retry = 0; joined = true;
         status(`connected to #${channel}`);
-        if (!debug) setTimeout(() => status(""), 5000);
+        clearTimeout(hideTimer);
+        if (!debug) hideTimer = setTimeout(() => { if (joined) status(""); }, 5000);
         continue;
       }
-      if (/^(?:@\S+ )?:tmi\.twitch\.tv RECONNECT\b/.test(line)) { ws.close(); continue; }
+      if (/^(?:@\S+ )?:tmi\.twitch\.tv RECONNECT\b/.test(line)) { reconnect("Twitch asked to reconnect"); return; }
       const msg = parseLine(line);
       if (!msg) continue;
       const text = clean(msg.text);
@@ -195,13 +214,22 @@ function connect() {
     }
   };
 
-  ws.onclose = () => {
-    const delay = Math.min(30000, 1000 * 2 ** retry++);
-    status(`disconnected — retrying in ${Math.round(delay / 1000)}s`);
-    setTimeout(connect, delay);
-  };
-  ws.onerror = () => ws.close();
+  sock.onclose = () => reconnect("disconnected");
+  sock.onerror = () => reconnect("connection error");
 }
+
+// Watchdog. A WebSocket can die silently (Wi-Fi blip, PC sleep, Twitch dropping
+// the link) without the browser ever firing onclose — the widget would then
+// wait forever. So: if joining takes >15 s, or nothing at all arrives for 75 s,
+// treat the connection as dead. While idle we PING every 30 s so a healthy
+// connection always has traffic (Twitch answers with PONG).
+setInterval(() => {
+  if (!ws || reconnectTimer) return;
+  const idle = Date.now() - lastSeen;
+  if (!joined && idle > 15000) return reconnect("connect timed out");
+  if (idle > 75000)            return reconnect("connection went quiet");
+  if (idle > 30000 && ws.readyState === 1) ws.send("PING :deathcount");
+}, 10000);
 
 connect();
 </script>
