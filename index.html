@@ -69,7 +69,7 @@ const CONFIG = {
 const params  = new URLSearchParams(location.search);
 const channel = (params.get("channel") || CONFIG.channel).toLowerCase().replace(/^#/, "");
 const cmd     = (params.get("cmd") || CONFIG.cmd).toLowerCase().replace(/^!/, "");
-const label   = params.get("label") ?? CONFIG.label;
+const label   = params.has("label") ? params.get("label") : CONFIG.label;
 const allowVIP = params.has("vip") ? params.get("vip") === "1" : CONFIG.allowVIP;
 const debug   = params.get("debug") === "1";   // ?debug=1 shows every chat line the widget receives
 const storeKey = `deathcount:${channel}:${cmd}`;
@@ -82,10 +82,10 @@ $label.textContent = label;
 
 // ---- persistence (survives OBS restarts; per-machine) ----
 function load() {
-  try { return parseInt(localStorage.getItem(storeKey), 10) || 0; } catch { return 0; }
+  try { return parseInt(localStorage.getItem(storeKey), 10) || 0; } catch (e) { return 0; }
 }
 function save(n) {
-  try { localStorage.setItem(storeKey, String(n)); } catch {}
+  try { localStorage.setItem(storeKey, String(n)); } catch (e) {}
 }
 
 let count = load();
